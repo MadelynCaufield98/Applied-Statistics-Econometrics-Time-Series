@@ -1,0 +1,521 @@
+---
+title: "Project 1"
+output: pdf_document
+authors: "Gabrielle Rivera, Jin Choi, Maddie Caufield"
+---
+We picked the Online News Popularity data set because the topic was both relevant in the age of disinformation and social media and the data was both sufficiently large and contained several variables that could be contained for analysis. We aim to use different factors to predict which news articles are shared. 
+
+Variable description: https://code.datasciencedojo.com/datasciencedojo/datasets/tree/master/Online%20News%20Popularity
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+rm(list=ls(all=TRUE))
+library('ggplot2')
+library('car')
+library('fAsianOptions')
+library('base')
+library('combinat')
+library('prob')
+library(pastecs)
+library(psych)
+library(tidyverse)
+library(readxl)
+library(tseries)
+library(DAAG)
+library(MASS)
+library(AER)
+library("margins")
+library(lattice)
+library(effects)
+library("Boruta")
+
+
+getwd()
+News = read_csv(file = "OnlineNewsPopularity.csv",col_names = TRUE)
+head(News)
+
+# Add id column
+News <- News %>% mutate(id = row_number())
+```
+
+# 1. Variable Selection
+
+## (a) Boruta
+```{r eval=FALSE}
+set.seed(123)
+Borutacheck = Boruta(shares~.-url, data = News, doTrace = 2)
+print(Borutacheck)
+```
+```{r eval=FALSE}
+print(Borutacheck)
+summary(Borutacheck)
+getSelectedAttributes(Borutacheck)
+```
+
+## (b) Mallows CP
+```{r}
+library(car)
+library(AER)
+library(broom)
+library(leaps)
+
+MallowsNews =regsubsets(shares~timedelta+n_tokens_content+num_imgs+n_non_stop_words+n_non_stop_unique_tokens+num_hrefs+num_keywords+self_reference_min_shares+global_sentiment_polarity+global_rate_positive_words+global_subjectivity+avg_positive_polarity+global_rate_negative_words+kw_avg_avg+LDA_00, data = News,nbest=2)
+subsets(MallowsNews,statistic="cp",legend=F,main="Mallows CP",col="steelblue4",ylim=c(0,50))
+subsets(MallowsNews,statistic="cp",legend=F,main="Mallows CP",col="steelblue4",ylim=c(0,20))
+
+#out = leaps(News[,-c(61)], News$shares, method = "Cp")
+#cbind(as.matrix(out$which),out$Cp)
+#best.model = which(out$Cp==min(out$Cp))
+#cbind(as.matrix(out$which),out$Cp)[best.model,]
+
+```
+
+## (c) Choice of predictors
+Both Boruta Method and Mallows CP suggest that these factors would be relevant :
+  Time Delta
+  Number of Tokens Constant
+  Number of Images
+  Number of HRefs
+  Number of Keywords
+  Self Reference Min Shares
+  global_sentiment_polarity
+  avg_positive_polarity
+  kw_avg_avg
+
+From these, pick:
+Time Delta, Number of Tokens Constant, Number of Images, Number of Key Words, Self Reference Minimum Shares and Global Sentiment Polarity
+```{r}
+# New dataframe with chosen variables
+df <- dplyr::select(News, id, shares, timedelta, n_tokens_content, num_imgs, num_keywords, self_reference_min_shares, global_sentiment_polarity)
+head(df)
+```
+
+# 2. Descriptive Analysis
+
+## (a) Variables
+
+```{r}
+describe(df)
+```
+
+- Dependent Variable : shares (Number Of Shares)
+```{r}
+summary(df$shares)
+describe(df$shares)
+hist(df$shares)
+boxplot(df$shares)
+
+qqnorm(df$shares, pch = 1, frame = FALSE)
+qqline(df$shares, col = "steelblue", lwd = 2)
+```
+
+The number of shares is extremely skewed to the right. We can already assume that we need to log-transform our dependent variable 'shares'.
+
+- 1. timedelta (Days Between The Article Publication And The Dataset Acquisition (Non-Predictive))
+```{r}
+summary(df$timedelta)
+describe(df$timedelta)
+hist(df$timedelta)
+boxplot(df$timedelta)
+
+qqnorm(df$timedelta, pch = 1, frame = FALSE)
+qqline(df$timedelta, col = "steelblue", lwd = 2)
+```
+
+The distribution of the 'timedelta' variable lies between 8 and 731. It seems uniformly distributed with a higher frequency between 20 and 200.
+
+- 2. n_tokens_content (Number Of Words In The Content)
+```{r}
+summary(df$n_tokens_content)
+describe(df$n_tokens_content)
+hist(df$n_tokens_content)
+boxplot(df$n_tokens_content)
+
+qqnorm(df$n_tokens_content, pch = 1, frame = FALSE)
+qqline(df$n_tokens_content, col = "steelblue", lwd = 2)
+```
+
+- 3. num_imgs (Number Of Images)
+```{r}
+summary(df$num_imgs)
+describe(df$num_imgs)
+hist(df$num_imgs)
+boxplot(df$num_imgs)
+
+qqnorm(df$num_imgs, pch = 1, frame = FALSE)
+qqline(df$num_imgs, col = "steelblue", lwd = 2)
+```
+
+Both the number of words in the content and the number of images are very right-skewed which indicates that linear transformations might be needed.
+
+- 4. num_keywords (Number Of Keywords In The Metadata)
+```{r}
+summary(df$num_keywords)
+describe(df$num_keywords)
+
+num_keywords <- as.data.frame(table(df$num_keywords))
+num_keywords
+barplot(num_keywords$Freq, names.arg = num_keywords$Var1)
+
+boxplot(df$num_keywords)
+```
+
+The number of keywords in the metadata is distributed between 1 and 10, with both a median and mode of 7.
+
+- 5. self_reference_min_shares (Min. Shares Of Referenced Articles In Mashable)
+```{r}
+summary(df$self_reference_min_shares)
+describe(df$self_reference_min_shares)
+hist(df$self_reference_min_shares)
+boxplot(df$self_reference_min_shares)
+
+qqnorm(df$self_reference_min_shares, pch = 1, frame = FALSE)
+qqline(df$self_reference_min_shares, col = "steelblue", lwd = 2)
+```
+
+The minimum shares of referenced articles are also skewed to the right, just like the variable 'shares'. We suspect that the nature of the internet news popularity results in this skewness.
+
+- 6. global_sentiment_polarity (Text Sentiment Polarity)
+```{r}
+summary(df$global_sentiment_polarity)
+describe(df$global_sentiment_polarity)
+hist(df$global_sentiment_polarity)
+boxplot(df$global_sentiment_polarity)
+
+qqnorm(df$global_sentiment_polarity, pch = 1, frame = FALSE)
+qqline(df$global_sentiment_polarity, col = "steelblue", lwd = 2)
+```
+The global text sentiment polarity is distributed as a bell shape between -0.39	and 0.73, with the mean and median of 0.12.
+
+```{r}
+library(corrplot)
+
+df.cor = cor(df)
+df.cor
+corrplot(df.cor, tl.cex=0.8, tl.srt=20, tl.col="black")
+```
+
+The highest correlation detected is between the number of images and the number of words. However, the correlation between them is 0.34, which isn't too high. So we decided to keep all the variables for now.
+
+## (b) Density Plot
+
+```{r}
+plot(density(df$shares))
+plot(density(df$timedelta))
+plot(density(df$n_tokens_content))
+plot(density(df$num_imgs))
+plot(density(df$shares))
+plot(density(df$num_keywords))
+plot(density(df$self_reference_min_shares))
+plot(density(df$global_sentiment_polarity))
+```
+
+## (c) Linear Transformation
+
+```{r}
+# shares
+symbox(df$shares)
+summary(powerTransform(shares ~ 1, data=df))
+```
+
+```{r}
+# Number of words
+symbox(df$n_tokens_content)
+
+# To log-transform the variable, we have to change the observations with value 0 to 0.01
+# length(which(df$n_tokens_content == 0))
+# df$n_tokens_content[df$n_tokens_content == 0] <- 0.01
+# I thought it would be better to delete the observation because if not it gives us a weird plot
+
+# Removing the observations with value 0
+df <- df[df$n_tokens_content != 0, ]
+
+summary(powerTransform(n_tokens_content ~ 1, data=df))
+```
+
+```{r}
+# Number of images
+symbox(df$num_imgs)
+
+# Removing the observations with value 0
+df <- df[df$num_imgs != 0, ]
+
+summary(powerTransform(num_imgs ~ 1, data=df))
+```
+
+```{r}
+# Minimum shares of referenced articles
+symbox(df$self_reference_min_shares)
+
+# Removing the observations with value 0
+df <- df[df$self_reference_min_shares != 0, ]
+
+summary(powerTransform(self_reference_min_shares ~ 1, data=df))
+```
+
+The results of all 4 variables we've tested show the Estimated Power close to 0. In the LR test, the p values for lambda = 0 and 1 are both < 2.22e-16. However, we have already seen from the histograms above that the values are extremely skewed. Therefore we conclude that log-transformations are appropriate for these variables.
+
+```{r}
+logshares <- bcPower(df$shares, 0)
+logntokens <- bcPower(df$n_tokens_content, 0)
+lognumimgs <- bcPower(df$num_imgs, 0)
+logrefminshares <- bcPower(df$self_reference_min_shares, 0)
+
+df <- cbind(df, logshares, logntokens, lognumimgs, logrefminshares)
+head(df)
+```
+
+## (d) Outliers
+```{r}
+head(df$shares[order(-df$shares)])
+head(df$n_tokens_content[order(-df$n_tokens_content)])
+head(df$num_imgs[order(-df$num_imgs)])
+head(df$self_reference_min_shares[order(-df$self_reference_min_shares)])
+```
+
+```{r}
+plot(logshares ~ timedelta, data=df)
+  with(df, showLabels(timedelta, logshares, n=4, method="mahal"))
+plot(logshares ~ num_keywords, data=df)
+  with(df, showLabels(timedelta, num_keywords, n=4, method="mahal"))
+plot(logshares ~ global_sentiment_polarity, data=df)
+  with(df, showLabels(timedelta, global_sentiment_polarity, n=4, method="mahal"))
+plot(logshares ~ logntokens, data=df)
+  with(df, showLabels(logntokens, logshares, n=4, method="mahal"))
+plot(logshares ~ lognumimgs, data=df)
+  with(df, showLabels(lognumimgs, logshares, n=4, method="mahal"))
+plot(logshares ~ logrefminshares, data=df)
+  with(df, showLabels(logrefminshares, logshares, n=4, method="mahal"))
+
+fit1 <- lm(logshares ~ timedelta + logntokens + lognumimgs + num_keywords + logrefminshares + global_sentiment_polarity, data=df)
+plot(fit1)
+```
+
+Since we've transformed the variables, a lot of the outliers have disappeared. However, heteroscedasticity could be a problem along the way.
+
+## (e) NAs
+
+```{r}
+anyNA(df)
+```
+
+We do not have any NAs.
+
+# 3. Model Building:
+
+## Evaluate transformations of variables
+
+```{r}
+fit1 <- lm(logshares ~ timedelta + logntokens + lognumimgs + num_keywords + logrefminshares + global_sentiment_polarity, data=df)
+summary(fit1)
+```
+
+logntokens is not statistically significant so we will remove it from the model. 
+
+```{r}
+fit2 <- lm(logshares ~ timedelta + lognumimgs + num_keywords + logrefminshares + global_sentiment_polarity, data=df)
+```
+
+Understanding relationship between dependent and independent variables below.
+
+```{r}
+fit.time <- lm(logshares~timedelta, data=df) 
+plot(df$timedelta,df$logshares, pch=20, xlab="logshares", ylab="timedelta") 
+abline(fit.time,lwd=2,col="blue")
+
+fit.numimgs <- lm(logshares~lognumimgs, data=df) 
+plot(df$lognumimgs,df$logshares, pch=20, xlab="logshares", ylab="lognumimgs") 
+abline(fit.numimgs,lwd=2,col="blue")
+
+fit.num.key <- lm(logshares~num_keywords, data=df) 
+plot(df$num_keywords,df$logshares, pch=20, xlab="logshares", ylab="num_keywords") 
+abline(fit.num.key,lwd=2,col="blue")
+
+fit.minshare <- lm(logshares~logrefminshares, data=df) 
+plot(df$logrefminshares,df$logshares, pch=20, xlab="logshares", ylab="logrefminshares") 
+abline(fit.minshare,lwd=2,col="blue")
+
+fit.sent <- lm(logshares~global_sentiment_polarity, data=df) 
+plot(df$global_sentiment_polarity,df$logshares, pch=20, xlab="logshares", ylab="global_sentiment_polarity") 
+abline(fit.sent,lwd=2,col="blue")
+```
+
+Let's plot the residuals.
+
+```{r}
+plot(fit2$model$logshares, fit2$residuals, pch=20,ylab="Resdiduals", xlab="logshares", ylim = c(-6,6)) 
+abline(h=0,col="red",lwd=2)
+```
+
+Does not look like the model is a good fit. We have heterskedasticity.
+Let's look at the standardized residuals.
+
+```{r}
+residualPlots(fit2,type = "rstandard")
+residualPlots(fit2,type = "rstudent")
+residualPlots(fit2)
+```
+
+The tukey test tells us there is a pattern in the residuals for num_keywords, logrefminshares, and global_sentiment_polarity because the p-value is above 5%. This degrades the performance of our model.
+
+```{r}
+qqPlot(fit2, id=list(n=3))
+outlierTest(fit2)
+```
+
+From the Q-Q plot and outlier test it looks like there are some outliers we will want to remove. Let's do further analyses for identifying outliers. 
+
+```{r}
+influenceIndexPlot(fit2, id=list(n=10),vars="Cook")
+influenceIndexPlot(fit2, id=list(n=10))
+influencePlot(fit2, id=list(n=10))
+avPlots(fit2, id=list(n=10, method="mahal"))
+```
+
+From the influence plot, it looks like there are a lot of leverage, x-values, that are very far from the cluster of data. Let's check if the 10 outliers given from the outlier test are highly influential.
+
+```{r}
+fit3 = lm(logshares ~ timedelta + lognumimgs + num_keywords + logrefminshares + global_sentiment_polarity, subset = -c(14747, 5100, 1627, 1627, 9365, 2363, 1580, 5216, 9436, 10707, 11051), data=df)
+compareCoefs(fit2, fit3, se = FALSE)
+
+avPlots(lm(logshares ~ timedelta + lognumimgs + num_keywords + logrefminshares + global_sentiment_polarity, data=df))
+```
+
+Based on the comparison, it does not appear these 10 points were very influential, but we will keep them excluded anyways.
+
+```{r}
+marginalModelPlots(fit3, sd=TRUE)
+```
+
+```{r}
+mcPlots(fit3, ~ timedelta, overlaid=FALSE)
+mcPlots(fit3, ~ lognumimgs, overlaid=FALSE)
+mcPlots(fit3, ~ num_keywords, overlaid=FALSE)
+mcPlots(fit3, ~ logrefminshares, overlaid=FALSE)
+mcPlots(fit3, ~ global_sentiment_polarity, overlaid=FALSE)
+```
+```{r}
+crPlots(fit3, order=2)
+```
+
+There is not any major curvature, so it looks like the log transformations did their job. However, the lines are perfectly horizontal indicating insignificance in the variables, but the summary of the regression tells us otherwise. Let's try transforming some variables to a quadratic.
+
+```{r}
+fit4 <- update(fit3,
+. ~ . - timedelta + poly(timedelta, 2) - lognumimgs+ poly(lognumimgs, 2) - num_keywords + poly(num_keywords, 2) - logrefminshares+ poly(logrefminshares, 2) - global_sentiment_polarity + poly(global_sentiment_polarity, 2))
+crPlots(fit4, order=1)
+```
+
+This appears to have not done much. 
+
+## Test for multicollinearity
+
+```{r}
+vif(fit3)
+```
+
+the vif tells us we do not have multicollinearity and should not remove any of the existing variables. 
+
+## Test for heteroskedasticity
+
+```{r}
+spreadLevelPlot(fit3)
+
+ncvTest(fit3)
+
+bptest(fit3)
+```
+
+We reject the nulls and heteroskedasticity is clearly present.
+
+## Cook's distance & residuals plot
+
+```{r}
+plot(fit3$model$logshares, fit3$residuals, pch=20,ylab="Resdiduals", xlab="logshares", ylim = c(-6,6)) 
+abline(h=0,col="red",lwd=2)
+
+influenceIndexPlot(fit3, id=list(n=3),vars="Cook")
+```
+
+## Test for model misspecification
+
+```{r}
+library(lmtest)
+
+resettest(fit3, power=2, type="regressor")
+```
+
+According to the test, our model can be improved.
+
+## Model selection
+
+```{r}
+AIC(fit1, fit2, fit3)
+
+BIC(fit1, fit2, fit3)
+```
+
+## Cross Validation
+
+```{r}
+library("MASS")
+result <- rlm(logshares ~ timedelta + lognumimgs + num_keywords + logrefminshares + global_sentiment_polarity, data=df, maxit=200)
+summary(result)
+set.seed(12345)
+boot1 <- Boot(result, labels=names(coef(result)), R=100, method=c("case", "residual"))
+hist(boot1)
+```
+## Bootstrapping Model
+
+```{r}
+library(caret)
+library(mlbench)
+
+train(logshares ~., data = df,
+                           trControl = trainControl(method = "cv",
+                                                    number = 5,
+                                                    allowParallel = TRUE),
+                           method = "svmRadial",
+                           preProc = c("BoxCox"),
+                           na.action = na.pass)
+```
+
+## Stepwise regression
+
+```{r}
+library(car)
+library(AER)
+library(broom)
+library(leaps)
+library(tidyverse)
+library(caret)
+library(MASS) 
+suppressMessages(library("tidyverse"))
+
+training.samples <- df$logshares %>%
+createDataPartition(p = 0.8, list = FALSE) 
+train.data <- df[training.samples, ] 
+test.data <- df[-training.samples, ]
+
+model1 <- lm(logshares ~ ., data = train.data)
+predictions <- model1 %>% predict(test.data)
+
+data.frame(
+  RMSE = RMSE(predictions, test.data$logshares), R2 = 
+  R2(predictions, test.data$logshares)
+)
+
+vif(model1)
+
+model2 <- lm(logshares ~. -timedelta, id, n_tokens_content, data = train.data)
+predictions <- model2 %>% predict(test.data)
+
+data.frame(
+RMSE = RMSE(predictions, test.data$logshares), R2 = R2(predictions, test.data$logshares)
+)
+```
+
+The regression model we created didn't fully explain the model as evidenced by the low R squared and the lack of normally distributed residuals. This, however, was expected due to both the nature of the data and the limitations regarding the variables. By limiting our variables to less than 10 (of the over 60 in the initial data set), there is the possibility that some of the omitted variables could have helped better explain our data. In addition, the nature of the data - online shares - is subject to many other random variables that weren't provided in the data set. Thus, our model is sufficient for what it is: a base level predictor.
+

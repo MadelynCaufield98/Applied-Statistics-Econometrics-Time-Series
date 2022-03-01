@@ -1,0 +1,410 @@
+```{r}
+setwd("/Users/madelyncaufield/Desktop/ECON430 Applied Statistics, Econometrics and Time Series with R and Python/Project 2")
+finland = read.csv("Finland.csv")
+head(finland)
+norway = read.csv("Norway.csv")
+head(norway)
+```
+
+```{r}
+total <- merge(finland,norway,by="DATE")
+total
+
+names(total)[names(total) == "SLRTTO01FIQ661N"] <- "Finland"
+names(total)[names(total) == "SLRTTO01NOQ661N"] <- "Norway"
+names(finland)[names(finland) == "SLRTTO01FIQ661N"] <- "Finland"
+names(norway)[names(norway) == "SLRTTO01NOQ661N"] <- "Norway"
+head(total)
+head(finland)
+head(norway)
+```
+
+# time-series plot and ACF/PACF
+```{r}
+total.ts <- ts(total,frequency=4,start = c(1960,1),end=c(2020,7))  
+total.ts.qtr <- aggregate(total.ts,nfrequency=4) 
+total.ts.yr <- aggregate(total.ts,nfrequency=1) 
+plot.ts(total.ts[,2:3],main="Quarterly Volume of Total Retail Trade Sales",xlab="Year",ylab="Total Retail Trade Sales") 
+
+par(mfrow = c(2, 1))
+acf(total[,2:3], lag.max = 60, main="acf plot") #plotting ACF
+pacf(total[,2:3], lag.max = 60, main = "pacf plot") #plotting PACF
+```
+# ARIMA model on each series
+```{r}
+library(forecast)
+
+finland.ts = ts(finland)
+arima_fit_finland = auto.arima(finland.ts[,2])
+arima_fit_finland
+fit_finland = arima(finland.ts[,2], order = c(2,1,2))
+fit_finland
+fit_resid_finland = residuals(fit_finland)
+Box.test(fit_resid_finland, lag = 10, type = "Ljung-Box")
+
+norway.ts = ts(norway)
+arima_fit_norway = auto.arima(norway.ts[,2])
+arima_fit_norway
+fit_norway = arima(norway.ts[,2], order = c(2,1,2))
+fit_norway
+fit_resid_norway = residuals(fit_norway)
+Box.test(fit_resid_norway, lag = 10, type = "Ljung-Box")
+```
+For the finland and norway series, the ARIMA model is not a good fit. We can see this from the low p-values given by the Ljung-Box test.
+
+# model that includes trend, seasonality, and cyclical components
+```{r}
+total.ts <- ts(total,frequency=4,start = c(1960,1),end=c(2020,7)) 
+t<-seq(1960, 2020.7, length=length(total.ts))
+lgdata=log(total.ts)
+par(mfrow=c(2,1))
+plot(total.ts,xlab='Time', ylab="Sales", lwd=2)
+plot(lgdata,xlab='Time', ylab="Log (Sales)", lwd=2)
+
+#calling time series plot for finland dataset
+finland_ts<-ts(finland[,2],start=1960,freq=4) 
+t<-seq(1960, 2020,length=length(finland_ts))
+plot(stl(finland_ts,s.window="periodic"))
+
+#fit a quadratic trend model for finland
+lgfinland = log(finland_ts)
+t2<-t^2
+m1=lm(lgfinland~t+t2)
+par(mfrow=c(2,1))
+plot(lgfinland,ylab="Log (Sales)", xlab="Time", lwd=2, col='skyblue3', xlim=c(1960,2020))
+lines(t,m1$fit,col="red3",lwd=2)
+plot(t,m1$res, ylab="Residuals",type='l',xlab="Time")
+
+#fit a quadrtaic trend + seasonality model (no y-intercept) for finland
+m2=tslm(lgfinland~0+t+t2+season)
+par(mfrow=c(2,1))
+plot(lgfinland,ylab="Log (Sales)", xlab="Time", lwd=2, col='skyblue3')
+lines(t,m2$fit,col="red3",lwd=2,lty=2)
+plot(t,m2$res, ylab="Residuals",type='l',xlab="Time",lwd=2)
+
+#look at ACF & PACF for finland
+par(mfrow=c(2,1))
+acf(m2$res,lag=36,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(m2$res,lag=36,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+#from PACF do AR2 model
+
+#model: quadratic trend + seasonality + cycles for finland
+#finland_model=arima(lgfinland,order=c(2,0,0),xreg = cbind(t, t2),seasonal=list(order=c(1,0,1)))
+finland_model=arima(lgfinland,order=c(3,0,2), seasonal=list(order=c(2,1,1)))
+summary(finland_model)
+plot(lgfinland,ylab="Log (Sales)", xlab="Time", lwd=2, col='black')
+lines(fitted(finland_model),col="red")
+
+#ACF & PACF of full model for finland
+par(mfrow=c(2,1))
+acf(finland_model$res,lag=360,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(finland_model$res,lag=360,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+
+#even better if we include 'I' in ARMA for finland
+#finland_model=Arima(lgfinland,order=c(2,1,0),xreg = cbind(t, t2),seasonal=list(order=c(1,0,1)))
+#par(mfrow=c(2,1))
+#acf(finland_model$res,lag=360,main="Residual Sample Autocorrelations",xlab="Displacement")
+#pacf(finland_model$res,lag=360,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+
+#calling time series plot for norway dataset
+norway_ts<-ts(norway[,2],start=1960,freq=4) 
+t<-seq(1960, 2020,length=length(norway_ts))
+plot(stl(norway_ts,s.window="periodic"))
+
+#fit a quadratic trend model for norway
+lgnorway = log(norway_ts)
+t2<-t^2
+m5=lm(lgnorway~t+t2)
+par(mfrow=c(2,1))
+plot(lgnorway,ylab="Log (Sales)", xlab="Time", lwd=2, col='skyblue3', xlim=c(1960,2020))
+lines(t,m5$fit,col="red3",lwd=2)
+plot(t,m5$res, ylab="Residuals",type='l',xlab="Time")
+
+#fit a quadratic trend + seasonality model (no y-intercept) for norway
+m6=tslm(lgnorway~0+t+t2+season)
+par(mfrow=c(2,1))
+plot(lgnorway,ylab="Log (Sales)", xlab="Time", lwd=2, col='skyblue3')
+lines(t,m6$fit,col="red3",lwd=2,lty=2)
+plot(t,m6$res, ylab="Residuals",type='l',xlab="Time",lwd=2)
+
+#look at ACF & PACF for norway
+par(mfrow=c(2,1))
+acf(m6$res,lag=36,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(m6$res,lag=36,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+#from PACF do AR1 model
+
+#model: quadratic trend + seasonality + cycles for norway
+#norway_model=arima(lgnorway,order=c(1,0,0),xreg = cbind(t, t2),seasonal=list(order=c(1,0,1)))
+norway_model=arima(lgnorway,order=c(1,0,1), seasonal=list(order=c(0,1,1)))
+summary(norway_model)
+plot(lgnorway,ylab="Log (Sales)", xlab="Time", lwd=2, col='black')
+lines(fitted(norway_model),col="red")
+
+#ACF & PACF of full model for norway
+par(mfrow=c(2,1))
+acf(norway_model$res,lag=360,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(norway_model$res,lag=360,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+
+#even better if we include 'I' in ARMA for norway
+#norway_model=Arima(lgnorway,order=c(1,1,0),xreg = cbind(t, t2),seasonal=list(order=c(1,0,1)))
+#par(mfrow=c(2,1))
+#acf(norway_model$res,lag=360,main="Residual Sample Autocorrelations",xlab="Displacement")
+#pacf(norway_model$res,lag=360,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+```
+For both the finland and norway models we have fit a quadratic trend, seasonality, and cycle. We first took the log of each time series data set to normalize the variance. For the finland data the PACF showed us we would want to use an AR2 model. For the seasonal component of the finland model we went with SAR1 and SMA1. For the norway data the PACF showed us we want to use an AR1 model. For the seasonal component of the norway model we went with SAR1 and SMA1. Although adding the I=1 for the cycles in ARMA for both finland and norway improved the residuals in the ACF and PACF for the model, we see later that it was not a good fit after looking at the residuals vs. fitted values and CUSUM test. 
+
+#plotting respective residuals vs. fitted values
+```{r}
+#residuals vs. fitted values for finland model
+plot(lgfinland,ylab="Log (Sales)", xlab="Time", lwd=2, col='black')
+lines(fitted(finland_model),col="red")
+
+#residuals vs. fitted values for norway model
+plot(lgnorway,ylab="Log (Sales)", xlab="Time", lwd=2, col='black')
+lines(fitted(norway_model),col="red")
+```
+The residuals vs. fitted values nicely overlay each other. There is no apparent disassociation between the two and we can see trend, seasonality, and cycle in both. 
+
+#ACF & PACF for respective residuals
+```{r}
+#ACF & PACF for finland
+par(mfrow=c(2,1))
+acf(finland_model$res,lag=360,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(finland_model$res,lag=360,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+
+#ACF & PACF for norway
+par(mfrow=c(2,1))
+acf(norway_model$res,lag=360,main="Residual Sample Autocorrelations",xlab="Displacement")
+pacf(norway_model$res,lag=360,main="Residual Sample Partial Autocorrelations", xlab="Displacement")
+```
+The ACF and PACF residuals look pretty good with most of the residuals within the error bands. When we originally set I=1 for the cycles in ARIMA, we saw that the residuals were reduced and looked even better, however it was not the best fit for our particular model so we went with an ARMA model.
+
+#CUSUM
+```{r}
+library(strucchange)
+
+#CUSUM plot for finland model
+plot(efp(finland_model$res~1, type = "Rec-CUSUM"))
+
+#CUSUM plot for norway model
+plot(efp(norway_model$res~1, type = "Rec-CUSUM"))
+```
+There is a bit of a structural break for both models, with neither of them nicely about y=0. However, they are mostly within the red bands so we will go with it. 
+
+#recursive residuals
+```{r}
+library(strucchange)
+
+#plotting recursive residuals for finland model
+y=recresid(finland_model$res~1)
+plot(y, pch=16,ylab="Recursive Residuals for Finland Model")
+
+#plotting recursive residuals for norway model
+y=recresid(norway_model$res~1)
+plot(y, pch=16,ylab="Recursive Residuals for Norway Model")
+```
+The residuals are pretty well behaved, randomly scatters about y=0. The finland plot has a little less random scatter after x=100, but for the most part the plots are doing well. 
+
+#diagnostic statistics for finland and norway model
+```{r}
+#summary stats for finland model
+summary(finland_model)
+
+#summary stats for norway model
+summary(norway_model)
+```
+*insert discussion here*
+
+#forecast 12 steps ahead
+```{r}
+#12 step ahead forecast for finland model
+finland_model=Arima(lgfinland,order=c(2,0,0),include.drift=TRUE, seasonal=list(order=c(1,0,1)))
+plot(forecast(finland_model,h=12),shadecols="oldstyle")
+
+#12 step ahead forecast for norway model
+norway_model=Arima(lgnorway,order=c(1,0,0),include.drift=TRUE, seasonal=list(order=c(1,0,1)))
+plot(forecast(norway_model,h=12),shadecols="oldstyle")
+```
+#fitting VAR model using 2 variables 
+```{r}
+library(vars)
+
+#tis barcode for full data
+library(tis)
+
+finland<-ts(total[,2],start=1960,freq=4)
+norway<-ts(total[,3],start=1960,freq=4)
+
+plot(finland)
+nberShade()
+lines(finland,ylab="Volume of Total Retail Sales for Finland and Norway")
+lines(norway,col="blue")
+legend("topleft",legend=c("Finland","Norway"),text.col=c("black","blue"),bty="n")
+
+#fit a VAR(p) model to the data
+y=cbind(finland, norway)
+head(y)
+y_tot=data.frame(y)
+head(y_tot)
+VARselect(y_tot,10)
+
+#to fit a VAR(p) model, simply call 'VAR' and set p=value
+y_model=VAR(y_tot,p=9)
+summary(y_model)
+
+#plot the fit and orginal data
+#plot(y_model)
+#pdf("varplot.pdf", width=8, height=8) 
+#plot(y_model)
+#dev.off() 
+```
+*discuss results from fit here*
+
+#impulse response function
+```{r}
+#irf(y_model)
+#plot(irf(y_model, n.ahead=12))
+```
+*interpret results here*
+
+#granger-causality test
+```{r}
+#granger test
+grangertest(norway ~ finland, order = 9)
+grangertest(finland ~ norway, order = 9)
+```
+From the Granger causality tests, both norway regressed on finland and finland regressed on norway are significant meaning that both time series are useful for forecasting eachother. However, finland regressed on norway was more significant.
+
+#VAR model to forecast 12 steps ahead
+```{r}
+var.predict = predict(object=y_model, n.ahead=12)
+plot(var.predict)
+```
+Both forecasts look similar and like they have done the job.
+
+#backtest ARIMA model
+```{r}
+library(backtest)
+library(MTS)
+
+#a
+g = MTS::backtest(finland_model, finland_ts, 200, 12)
+g
+o <- g$error + g$forecasts
+mean(abs(g$error)/(o))* 100
+o
+plot(g$rmse)
+
+g2 = MTS::backtest(norway_model, norway_ts, 200, 12)
+g2
+o2 <- g2$error + g2$forecasts
+mean(abs(g2$error)/(o))* 100
+o2
+
+#b
+g3 = MTS::backtest(finland_model, finland_ts, 200, 1)
+g3
+o3 <- g3$error + g3$forecasts
+mean(abs(g3$error)/(o))* 100
+o3
+
+g4 = MTS::backtest(norway_model, norway_ts, 200, 1)
+g4
+o4 <- g4$error + g4$forecasts
+mean(abs(g4$error)/(o))* 100
+o4
+
+for (i in 1:12) {
+  o <- g$error + g$forecasts
+  mape[i] <- mean(abs(g$error[,i])/(o[,i]),na.rm = TRUE)* 100
+  }
+mape
+
+
+#c
+
+#d
+window_backtesting <- function(model, data, orig, h, xreg=NULL,fixed = NULL, inc.mean = TRUE, 
+                               reest = 1){
+  if(!inherits(data,"ts"))stop("data must be a time series object")
+  arma_order <- model$arma
+  regor = arma_order[c(1, 6, 2)]
+  seaor = list(order = arma_order[c(3, 7, 4)],  period = arma_order[5])
+  T = length(data)
+  if (orig > T) 
+    orig = T
+  if (h < 1) 
+    h = 1
+  rmse = numeric(h)
+  mabso = numeric(h)
+  
+  nori = T - orig
+  err = matrix(0, nori, h)
+  fcst = matrix(0, nori, h)
+  jlast = T - 1
+  time_vec <- time(data)
+  ireest <- reest
+  for (n in orig:jlast) {
+    jcnt = n - orig + 1
+    x <- window(data, time_vec[jcnt], time_vec[n]) 
+    if (is.null(xreg)) 
+      pretor = NULL
+    else pretor = xre[jcnt:n]
+    if (ireest == reest) {
+      mm = arima(x, order = regor, seasonal = seaor, xreg = pretor, 
+                 fixed = fixed, include.mean = inc.mean)
+      ireest <- 0
+    }
+    else {
+      ireest <- ireest + 1
+    }
+    if (is.null(xreg)) {
+      nx = NULL
+    }
+    else {
+      nx = xreg[(n + 1):(n + h)]
+    }
+    fore = predict(mm, h, newxreg = nx)
+    kk = min(T, (n + h))
+    nof = kk - n
+    pred = fore$pred[1:nof]
+    obsd = data[(n + 1):kk]
+    err[jcnt, 1:nof] = obsd - pred
+    fcst[jcnt, 1:nof] = pred
+  }
+  for (i in 1:h) {
+    iend = nori - i + 1
+    tmp = err[1:iend, i]
+    mabso[i] = sum(abs(tmp))/iend
+    rmse[i] = sqrt(sum(tmp^2)/iend)
+  }
+  print("RMSE of out-of-sample forecasts")
+  print(rmse)
+  print("Mean absolute error of out-of-sample forecasts")
+  print(mabso)
+  backtest <- list(origin = orig, error = err, forecasts = fcst, 
+                   rmse = rmse, mabso = mabso, reest = reest)
+}
+j = window_backtesting(finland_model, finland_ts, 200, 12)
+j
+plot(j$error)
+
+j2 = window_backtesting(norway_model, norway_ts, 200, 12)
+j2
+plot(j2$error)
+
+j3 = window_backtesting(finland_model, finland_ts, 200, 1)
+j3
+plot(j3$error)
+
+j4 = window_backtesting(norway_model, norway_ts, 200, 12)
+j4
+plot(j4$error)
+
+#e
+
+
+
+```
+
+
